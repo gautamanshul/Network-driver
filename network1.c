@@ -32,7 +32,79 @@ int os_open(struct net_device *dev) { netif_start_queue(dev); return 0; } /*Allo
 int os_stop(struct net_device *dev) { netif_stop_queue(dev); return 0; } /*Stop upper layers from calling the hard_start_xmit function to prevent data flow when transmit resources are unavailable*/
 static void os_interrupt(int irq, void *dev_id, struct pt_regs *regs) { }
 static void os_hw_tx(char *buf, int len, struct net_device *dev) { }
+
+void os_tx_i_handler(struct net_device *dev)
+{
+	struct os_priv *priv;
+	
+	priv = netdev_priv(dev);
+   	if (netif_queue_stopped(priv->pkt->dev)) netif_wake_queue(priv->pkt->dev);
+}
+
+void os_rx_i_handler(struct net_device *dev)
+{
+	struct os_priv *priv;
+	struct sk_buff *skb;
+	
+	priv = netdev_priv(dev);
+	int len = priv->skb->len;
+	char *data = priv->skb->data;
+	
+	skb = dev_alloc_skb(len);
+	memcpy(skb_put(skb, data, len);
+
+	skb->dev = dev;
+	skb->protocol = eth_type_trans(skb, dev);
+
+	netif_rx(skb);
+
+	if (netif_queue_stopped(priv->pkt->dev)) netif_wake_queue(priv->pkt->dev); 
+}
+
+/*Transmission of a packet is accomplished with os_start_xmit. This function is called by the OS after the header function above with the same struct sk_buff object as argument skb. Ordinarily, the next step would be to shove the packet out through the NIC. But, in this example, the packet is merely going to be looped back. The action of receiving the looped back packet through a NIC will be simulated by directly calling another function which would be the receive interrupt handler if a NIC had requested an interrupt. The looped back packet will be prepared from the one held by skb. The first step is to extract the packet and its length from skb like this*/
 int os_start_xmit(struct sk_buff *skb, struct net_device *dev) {
+	char *data = skb->data;
+	int len = skb->len;
+	struct os_priv *priv;
+	
+	/*The skb holds the packet data, so its needed until the handlers are called */
+	priv = netdev_priv(dev);
+	priv->skb = skb;
+
+	/*The IP header needs to be changed: the source and desitnation networks need to be reversed (for example, 192.168.0.1 is reversed to 192.168.1.1 and vice versa. The IP header may be referenced like this*/
+	struct iphdr *ih = (struct iphdr *)(data + sizeof(struct ethhdr));	
+
+	/*Reversals are accomplished as follows*/
+	u32 *saddr = &ih->saddr;
+	u32 *daddr = &ih->daddr;
+
+	((u8*)saddr)[2] ^= 1;
+	((u8*)daddr)[2] ^= 1;
+	
+	/*As IP requires checking a checksum, a new one should be created like this*/
+	ih->check = 0;
+	ih->check = ip_fast_csum((unsigned char*)ih, ih->ihl);
+
+	/*where ihl is the internet header lengh. In our example here, its not checked. Before calling the pseudo-receive interrupt handler, put the modified packet into the private area like this if the destination is net1*/
+	if (dev->dev_addr[ETH_ALEN-1] == 5) {
+		priv = netdev_priv(net1);
+		priv->pkt->len = len;
+		memcpy(priv->pkt->data, data, len);
+		os_rx_i_handler(net1); /*We call receive interrupt handler if the destination is net1*/
+		os_tx_i_handler(net0); /*Typically the NIC will generate a transmit interrupt and handling this can be simulated like this if the source is net1*/
+		priv = netdev_priv(net0); 
+		dev_kfree_skb(priv->skb);
+	} else {
+		priv = netdev_priv(net0);
+		priv->pkt->len = len;
+		memcpy(priv->pkt->data, data, len);
+		os_rx_i_handler(net0);
+		os_tx_i_handler(net1);
+		priv = netdev_priv(net1);
+		dev_kfree_skb(priv->skb);
+	}
+
+
 	return 0;
 }
 

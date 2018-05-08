@@ -1,4 +1,4 @@
-obj-m := network.o
+obj-m := network1.o
 
 KVERSION := $(shell uname -r)
 KDIR := /lib/modules/$(KVERSION)/build
